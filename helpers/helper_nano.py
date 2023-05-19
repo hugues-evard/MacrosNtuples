@@ -464,8 +464,10 @@ def ZTauTau_TauSelection(df):
     df = df.Define('Tau_PassTightId', 'Tau_idDeepTau2018v2p5VSe>=1&&Tau_idDeepTau2018v2p5VSjet>=5&&Tau_idDeepTau2018v2p5VSmu>=1')
     df = df.Define('Tau_PassProbe', 'pass_probeTau(Tau_pt, Tau_eta, Tau_phi, Tau_mass, Tau_charge, tagPt, tagEta, tagPhi, tagMass, tagCharge)')
 
-    df = df.Define('isProbeTau', 'Tau_PassProbe')
+    ## Commenting TauID cuts for testing. 
+    ## !! Need to uncomment later
     # df = df.Define('isProbeTau', 'Tau_PassDecayMode&&Tau_PassTightId&&Tau_PassProbe')
+    df = df.Define('isProbeTau', 'Tau_PassProbe')
     df = df.Filter('Sum(isProbeTau)>0')
 
     nEvts = df.Count().GetValue()
