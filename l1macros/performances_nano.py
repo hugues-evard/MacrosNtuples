@@ -32,7 +32,8 @@ def main():
                         -PhotonJet: For L1 jet studies with events trigger with a SinglePhoton trigger
                         -MuonJet: For L1 jet studies with events trigger with a SingleMuon trigger
                         -ZToMuMu: For L1 muon studies with Z->mumu
-                        -ZToEE: For L1 EG studies with Z->ee''', 
+                        -ZToEE: For L1 EG studies with Z->ee
+                        -ZToTauTau For L1 EG studies with Z->tautau''', 
                         type=str, default='PhotonJet')
     parser.add_argument("--plot_nvtx", dest="plot_nvtx", help="Whether to save additional plots in bins of nvtx. Boolean, default = False", type=bool, default=False)
     parser.add_argument("--nvtx_bins", dest="nvtx_bins", help="Edges of the nvtx bins to use if plotNvtx is set to True. Default=[10, 20, 30, 40, 50, 60]", nargs='+', type=int, default=[10, 20, 30, 40, 50, 60])
@@ -49,9 +50,10 @@ def main():
             inputFile = '/user/lathomas/Public/L1Studies/ZToMuMu.root'
         elif args.channel == 'ZToEE':
             inputFile = '/user/lathomas/Public/L1Studies/ZToEE.root'
+        elif args.channel == 'ZToTauTau' :
+            inputFile = '/user/lathomas/Public/L1Studies/ZToMuMu.root'  ## Have to change this
 
     ### Create filters and suffix, if needed, to later run on bins of nvtx
-
     filter_list = ["true"]
     suffix_list = [""]
 
@@ -97,7 +99,7 @@ def main():
     out = ROOT.TFile(args.outputFile, "recreate")
     ####The sequence of filters/column definition starts here
     
-    if args.channel not in ['PhotonJet','MuonJet','ZToMuMu','ZToEE']:
+    if args.channel not in ['PhotonJet','MuonJet','ZToMuMu','ZToEE', 'ZToTauTau']:
         print("Channel {} does not exist".format(args.channel))
         return 
 
@@ -268,6 +270,22 @@ def main():
 #
 #        for i in histos:
 #            histos[i].GetValue().Write()
+
+    if args.channel == 'ZToTauTau':
+        df = ZTauTau_TauSelection(df)
+
+        # make copies of df for each bin of nvtx (+1 copy of the original)
+        df_list = [df.Filter(nvtx_cut) for nvtx_cut in filter_list]
+        all_histos = {}
+
+        for i, df_element in enumerate(df_list):
+            df_element, histos = ZTauTau_Plots(df_element, suffix = suffix_list[i])
+
+            for key, val in histos.items():
+                all_histos[key] = val
+
+        for i in all_histos:
+            all_histos[i].GetValue().Write()
 
 
 if __name__ == '__main__':

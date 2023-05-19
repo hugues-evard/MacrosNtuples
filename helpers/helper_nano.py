@@ -9,7 +9,7 @@ from bins import *
 jetEtaBins = [0., 1.3, 2.5, 3., 3.5, 4., 5.]
 egEtaBins = [0., 1.479, 2.5]
 muEtaBins = [0., 0.83, 1.24, 2.4]
-
+tauEtaBins = [0., 1.5, 2.1]
 
 ht_bins = array('f', [ i*10 for i in range(50) ] + [ 500+ i*20 for i in range(25) ] + [1000 + i*50 for i in range(10)] +[1500,1600,1700,1800,2000,2500,3000])
 leptonpt_bins = array('f',[ i for i in range(50) ] + [ 50+2*i for i in range(10) ] + [ 70+3*i for i in range(10) ] + [100+10*i for i in range(10) ] + [200, 250, 300, 400, 500])
@@ -20,8 +20,7 @@ jetmetpt_bins = array('f',[ i*5 for i in range(50) ] +  [250+10*i for i in range
 #runnb_bins = array('f', runbinning())
 
 
-response_bins = array('f',[0.+float(i)/100. for i in range(200)] )
-
+response_bins = array('f', [0.+float(i)/100. for i in range(200)])
 runnb_bins = None
 
 def set_runnb_bins(df):
@@ -410,6 +409,74 @@ def ZMuMu_MuSelection(df):
     
     return df
 
+
+def ZTauTau_TauSelection(df):
+    '''
+    Selects Z->tautau events passing a single muon trigger. Defines probe tau pt/eta/phi
+    '''
+    df = df.Filter('HLT_IsoMu24')
+
+    # Trigged on a Muon (probably redundant)
+    df = df.Filter('''
+    bool trigged_on_mu = false;
+    for (unsigned int i = 0; i < TrigObj_id.size(); i++){
+        if(TrigObj_id[i] == 13) trigged_on_mu = true;
+    }
+    return trigged_on_mu;
+    ''')
+
+    # Charge 
+    # L1Mu_hwCharge = 0 corresponds to Muon_charge = +1
+    # L1Mu_hwCharge = 1 corresponds to Muon_charge = -1
+    df = df.Define('L1Mu_charge', 'charge_conversion(L1Mu_hwCharge)')
+
+    # --------------------------------------------------------
+    # Match L1Mu to trig obj with id == 13 -> L1Mu_trig_idx
+    # with L1Mu_trig_idx -> check filter bits -> L1Mu_passHLT
+    # --------------------------------------------------------
+
+    # TrigObj matching
+    df = df.Define('Muon_trig_idx', 'MatchObjToTrig(Muon_eta, Muon_phi, TrigObj_pt, TrigObj_eta, TrigObj_phi, TrigObj_id, 13)')
+    df = df.Define('Muon_passHLT_IsoMu24', 'trig_is_filterbit1_set(Muon_trig_idx, TrigObj_filterBits)')
+
+    df = df.Define('Muon_PassTightId','Muon_pfIsoId>=3&&Muon_mediumPromptId') 
+    df = df.Define('Muon_MassId', 'pass_muon_met_mass_below30(Muon_pt, Muon_phi, MET_pt, MET_phi)')
+
+    df = df.Define('isTag','Muon_pt>24&&abs(Muon_eta)<2.1&&abs(Muon_pdgId)==13&&Muon_PassTightId&&Muon_passHLT_IsoMu24&&Muon_MassId')
+    df = df.Filter('Sum(isTag)>0')
+
+    df = df.Define('tagIdx', 'first_tagmuon_idx(isTag)')
+    df = df.Filter('tagIdx!=-1')
+
+    df = df.Define('tagPt', 'Muon_pt[tagIdx]')
+    df = df.Define('tagEta', 'Muon_eta[tagIdx]')
+    df = df.Define('tagPhi', 'Muon_phi[tagIdx]')
+    df = df.Define('tagMass', 'Muon_mass[tagIdx]')
+    df = df.Define('tagCharge', 'Muon_charge[tagIdx]')
+
+    nEvts = df.Count().GetValue()
+    print("There are {} events after finding tag muon".format(nEvts))
+
+    # Decay mode 5 and 6 are unphysical, so removing them
+    # Applying Tau_Id_Discrimination against e, mu, jets
+    # Applying probe tau selection criterion with the given tag muon
+    df = df.Define('Tau_PassDecayMode', 'Tau_decayMode!=5&&Tau_decayMode!=6')
+    df = df.Define('Tau_PassTightId', 'Tau_idDeepTau2018v2p5VSe>=1&&Tau_idDeepTau2018v2p5VSjet>=5&&Tau_idDeepTau2018v2p5VSmu>=1')
+    df = df.Define('Tau_PassProbe', 'pass_probeTau(Tau_pt, Tau_eta, Tau_phi, Tau_mass, Tau_charge, tagPt, tagEta, tagPhi, tagMass, tagCharge)')
+
+    df = df.Define('isProbeTau', 'Tau_PassProbe')
+    # df = df.Define('isProbeTau', 'Tau_PassDecayMode&&Tau_PassTightId&&Tau_PassProbe')
+    df = df.Filter('Sum(isProbeTau)>0')
+
+    nEvts = df.Count().GetValue()
+    print("There are {} events after finding tag Taus".format(nEvts))
+
+    df = df.Define('probe_Pt','Tau_pt[isProbeTau]')
+    df = df.Define('probe_Eta','Tau_eta[isProbeTau]')
+    df = df.Define('probe_Phi','Tau_phi[isProbeTau]')
+
+    return df
+
 def makehistosforturnons_inprobeetaranges(df, histos, etavarname, phivarname, ptvarname, responsevarname, etabins, l1varname, l1thresholds, prefix, binning, l1thresholdforeffvsrunnb, offlinethresholdforeffvsrunnb, suffix = ''):
     '''Make histos for turnons vs pt (1D histos for numerator and denominator) in ranges of eta
     Also look at response vs run number (2D histo) '''
@@ -453,10 +520,65 @@ def makehistosforturnons_inprobeetaranges(df, histos, etavarname, phivarname, pt
             df_loc = df_loc.Define('numerator_pt',ptvarname+'[inEtaRange&&passL1Cond]')
             histos[prefix+str_binetapt+suffix] = df_loc.Histo1D(ROOT.RDF.TH1DModel('h_{}_{}'.format(prefix, str_binetapt)+suffix, '', len(binning)-1, binning), 'numerator_pt')
 
-
     return df
 
+
+def ZTauTau_Plots(df, suffix = ''):
+
+    histos = {}
+    label = ['NonIso', 'Iso']
+    df_tau = [None, None]
     
+    for i in range(2):
+        if i == 0:
+            df_tau[i] = df.Define('probe_idxL1jet','FindL1ObjIdx(L1Tau_eta, L1Tau_phi, probe_Eta, probe_Phi)')
+            # df_tau[i] = df_tau[i].Define('probe_idxL1jet_Bx0','FindL1ObjIdx_setBx(L1Tau_eta, L1Tau_phi, L1Tau_bx, probe_Eta, probe_Phi, 0)')
+            # df_tau[i] = df_tau[i].Define('probe_idxL1jet_Bxmin1','FindL1ObjIdx_setBx(L1Tau_eta, L1Tau_phi, L1Tau_bx, probe_Eta, probe_Phi, -1)')
+            # df_tau[i] = df_tau[i].Define('probe_idxL1jet_Bxplus1','FindL1ObjIdx_setBx(L1Tau_eta, L1Tau_phi, L1Tau_bx, probe_Eta, probe_Phi, 1)')
+        if i == 1:
+            df_tau[i] = df.Define('probe_idxL1jet','FindL1ObjIdx(L1Tau_eta, L1Tau_phi, probe_Eta, probe_Phi, L1Tau_hwIso, 1)')
+            # df_tau[i] = df_tau[i].Define('probe_idxL1jet_Bx0','FindL1ObjIdx_setBx(L1Tau_eta, L1Tau_phi, L1Tau_bx, probe_Eta, probe_Phi, 0, L1Tau_hwIso, 1)')
+            # df_tau[i] = df_tau[i].Define('probe_idxL1jet_Bxmin1','FindL1ObjIdx_setBx(L1Tau_eta, L1Tau_phi, L1Tau_bx, probe_Eta, probe_Phi, -1, L1Tau_hwIso, 1)')
+            # df_tau[i] = df_tau[i].Define('probe_idxL1jet_Bxplus1','FindL1ObjIdx_setBx(L1Tau_eta, L1Tau_phi, L1Tau_bx, probe_Eta, probe_Phi, 1, L1Tau_hwIso, 1)')
+            
+        df_tau[i] = df_tau[i].Define('probe_L1Pt','GetVal(probe_idxL1jet, L1Tau_pt)')
+        df_tau[i] = df_tau[i].Define('probe_L1Bx','GetVal(probe_idxL1jet, L1Tau_bx)')
+        df_tau[i] = df_tau[i].Define('probe_L1Iso','GetVal(probe_idxL1jet, L1Tau_hwIso)')
+
+        # df_tau[i] = df_tau[i].Define('probe_L1Pt_Bx0', 'GetVal(probe_idxL1jet_Bx0, L1Tau_pt)')
+        # df_tau[i] = df_tau[i].Define('probe_L1Iso_Bx0', 'GetVal(probe_idxL1jet_Bx0, L1Tau_hwIso)')
+
+        # df_tau[i] = df_tau[i].Define('probe_L1Pt_Bxmin1', 'GetVal(probe_idxL1jet_Bxmin1, L1Tau_pt)')
+        # df_tau[i] = df_tau[i].Define('probe_L1Iso_Bxmin1', 'GetVal(probe_idxL1jet_Bxmin1, L1Tau_hwIso)')
+
+        # df_tau[i] = df_tau[i].Define('probe_L1Pt_Bxplus1', 'GetVal(probe_idxL1jet_Bxplus1, L1Mu_pt)')
+        # df_tau[i] = df_tau[i].Define('probe_L1Iso_Bxplus1', 'GetVal(probe_idxL1jet_Bxplus1, L1Mu_hwIso)')
+
+        df_tau[i] = df_tau[i].Define('probe_L1PtoverRecoPt','probe_L1Pt/probe_Pt')
+        
+        pt_binning = leptonpt_bins
+        if suffix != '':
+            pt_binning = coarse_leptonpt_bins
+
+        df_tau[i] = makehistosforturnons_inprobeetaranges(
+            df_tau[i], 
+            histos, 
+            etavarname='probe_Eta', 
+            phivarname='probe_Phi', 
+            ptvarname='probe_Pt', 
+            responsevarname='probe_L1PtoverRecoPt', 
+            etabins=tauEtaBins, 
+            l1varname='probe_L1Pt', 
+            l1thresholds=[28, 30, 32],  
+            prefix=label[i]+"_plots" , 
+            binning = pt_binning, 
+            l1thresholdforeffvsrunnb = 22, 
+            offlinethresholdforeffvsrunnb = 27, 
+            suffix = suffix
+        )
+
+    return df, histos 
+
 
 def ZEE_Plots(df, suffix = ''):
     histos = {}
@@ -465,17 +587,17 @@ def ZEE_Plots(df, suffix = ''):
     df_eg = [None, None, None]
     for i in range(3): 
         
-        if i ==0:
+        if i == 0:
             df_eg[i] = df.Define('probe_idxL1jet','FindL1ObjIdx(L1EG_eta, L1EG_phi, probe_Eta, probe_Phi)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bx0','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, 0)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bxmin1','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, -1)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bxplus1','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, 1)')
-        if i ==1:
+        if i == 1:
             df_eg[i] = df.Define('probe_idxL1jet','FindL1ObjIdx(L1EG_eta, L1EG_phi, probe_Eta, probe_Phi, L1EG_hwIso, 2)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bx0','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, 0, L1EG_hwIso, 2)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bxmin1','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, -1, L1EG_hwIso, 2)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bxplus1','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, 1, L1EG_hwIso, 2)')
-        if i ==2:
+        if i == 2:
             df_eg[i] = df.Define('probe_idxL1jet','FindL1ObjIdx(L1EG_eta, L1EG_phi, probe_Eta, probe_Phi, L1EG_hwIso, 3)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bx0','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, 0, L1EG_hwIso, 3)')
             df_eg[i] = df_eg[i].Define('probe_idxL1jet_Bxmin1','FindL1ObjIdx_setBx(L1EG_eta, L1EG_phi, L1EG_bx, probe_Eta, probe_Phi, -1, L1EG_hwIso, 3)')
@@ -503,8 +625,7 @@ def ZEE_Plots(df, suffix = ''):
         histos['h_EG25_EtaPhi_Numerator'+label[i]+suffix] = df_eg[i].Histo2D(ROOT.RDF.TH2DModel('h_EG25_EtaPhi_Numerator'+suffix, '', 100, -5,5, 100, -3.1416, 3.1416), 'probePt30PassL1EG25_Eta', 'probePt30PassL1EG25_Phi')
         histos['h_EG25_EtaPhi_Denominator'+label[i]+suffix] = df_eg[i].Histo2D(ROOT.RDF.TH2DModel('h_EG25_EtaPhi_Denominator'+suffix, '', 100, -5,5, 100, -3.1416, 3.1416), 'probePt30_Eta', 'probePt30_Phi')
 
-        
-        if i ==0:
+        if i == 0:
             df_eg[i] = df_eg[i].Define('probeL1EG15to26Bxmin1_Eta', 'probe_Eta[probe_Pt>12&&probe_Pt<23&&probe_L1Pt_Bxmin1>15&&probe_L1Pt_Bxmin1<=26&&probe_L1Bx==-1]')
             df_eg[i] = df_eg[i].Define('probeL1EG15to26Bxmin1_Phi', 'probe_Phi[probe_Pt>12&&probe_Pt<23&&probe_L1Pt_Bxmin1>15&&probe_L1Pt_Bxmin1<=26&&probe_L1Bx==-1]')
             df_eg[i] = df_eg[i].Define('probeL1EG15to26Bx0_Eta', 'probe_Eta[probe_Pt>12&&probe_Pt<23&&probe_L1Pt_Bx0>15&&probe_L1Pt_Bx0<=26&&probe_L1Bx==0]')
@@ -523,7 +644,6 @@ def ZEE_Plots(df, suffix = ''):
 
     return df, histos
     
-
 
 def ZMuMu_Plots(df, suffix = ''):
 
@@ -652,14 +772,8 @@ def ZMuMu_Plots(df, suffix = ''):
             histos['L1Mu22_denforPrefiring_etaphi'] = df_mu[i].Filter('Flag_IsUnprefirable').Histo2D(ROOT.RDF.TH2DModel('', '', 100, -5,5, 100, -3.1416, 3.1416), 'probePt30PassL1Mu22_Eta', 'probePt30PassL1Mu22_Phi')
             histos['L1Mu22_numforPrefiring_etaphi'] = df_mu[i].Filter('Flag_IsUnprefirable').Histo2D(ROOT.RDF.TH2DModel('', '', 100, -5,5, 100, -3.1416, 3.1416), 'probeEta_L1Mu22_inbxmin1', 'probePhi_L1Mu22_inbxmin1')
             '''
-
-
-
     return df, histos
     
-
-
-
 
 def CleanJets(df):
     #List of cleaned jets (noise cleaning + lepton/photon overlap removal)
@@ -854,10 +968,6 @@ def HFNoiseStudy(df, suffix = ''):
         histos[p+'_HighPtJet_HFCentralVsAdjacentEtaStripSize'+suffix] = df_passvsfailL1[i].Histo2D(ROOT.RDF.TH2DModel(p+'_HighPtJet_HFCentralVsAdjacentEtaStripSize'+suffix, '', 10, 0, 10, 10, 0, 10), 'HighPtJet_HFCentralEtaStripSize', 'HighPtJet_HFAdjacentEtaStripSize')
 
         histos[p+'MET_pt'+suffix] = df_passvsfailL1[i].Histo1D(ROOT.RDF.TH1DModel(p+'MET_pt'+suffix, '', 100,0,500), 'MET_pt')
-
-
-
-
 
     return df, histos
     
