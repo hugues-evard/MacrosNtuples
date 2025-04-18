@@ -12,7 +12,6 @@ ROOT.gInterpreter.Declare('#include "../helpers/Helper_InvariantMass.h"')
 #Importing stuff from other python files
 sys.path.insert(0, '../helpers')
 
-#from helper_nano import * 
 import helper_nano as h
 
 
@@ -31,9 +30,12 @@ def main():
     parser.add_argument("-c", "--channel", dest="channel", help=
                         '''Set channel and analysis:
                         -PhotonJet: For L1 jet studies with events trigger with a SinglePhoton trigger
+                        -DiJet: For L1 jet studies with events triggered with a SingleJet trigger
                         -MuonJet: For L1 jet studies with events trigger with a SingleMuon trigger
                         -ZToMuMu: For L1 muon studies with Z->mumu
-                        -ZToEE: For L1 EG studies with Z->ee''', 
+                        -ZToEE: For L1 EG studies with Z->ee
+                        -ZToTauTau: For L1 Tau studies with Z->tau(mu)tau(h)
+                        ''', 
                         type=str, default='PhotonJet')
     parser.add_argument("--config", dest="config", help="Yaml configuration file to read. Default: full config for that channel.", type=str, default='')
     #parser.add_argument("--plot_nvtx", dest="plot_nvtx", help="Whether to save additional plots in bins of nvtx. Boolean, default = False", type=bool, default=False)
@@ -44,20 +46,16 @@ def main():
     inputFile = args.inputFile
     if inputFile == '':
         if args.channel == 'PhotonJet':
-            #inputFile = '/user/lathomas/Public/L1Studies/PhotonJet.root'
-            inputFile = '/pnfs/iihe/cms/ph/sc4/store/data/Run2023C/EGamma0/NANOAOD/PromptNanoAODv11p9_v1-v1/70000/3b1e99a5-71a0-46ee-b720-b79669f60029.root'
+            inputFile = '/pnfs/iihe/cms/store/user/lathomas/EGamma1/2023Dv1_L1TNanowithPrefiringInfo/231129_154543/0000/out_234.root'
         elif args.channel == 'MuonJet':
-            #inputFile = '/user/lathomas/Public/L1Studies/MuJet.root'
-            #inputFile = '/pnfs/iihe/cms/ph/sc4/store/data/Run2023C/Muon1/NANOAOD/PromptNanoAODv11p9_v1-v1/60000/37c190ac-242c-47d7-a98f-9c51b111ff00.root'
-            inputFile = '/pnfs/iihe/cms/ph/sc4/store/data/Run2023C/Muon1/NANOAOD/PromptNanoAODv12_v2-v2/60000/ee7372a9-da2d-4b3e-8a0e-3cba6d2272a5.root'
+            inputFile = '/pnfs/iihe/cms/store/user/lathomas/Muon1/2023Dv1_L1TNanowithPrefiringInfo/231129_162737/0000/out_196.root'
         elif args.channel == 'ZToMuMu':
-            #inputFile = '/user/lathomas/Public/L1Studies/ZToMuMu.root'
-            #inputFile = '/pnfs/iihe/cms/ph/sc4/store/data/Run2023C/Muon1/NANOAOD/PromptNanoAODv11p9_v1-v1/60000/37c190ac-242c-47d7-a98f-9c51b111ff00.root'
-            inputFile = '/pnfs/iihe/cms/ph/sc4/store/data/Run2023C/Muon1/NANOAOD/PromptNanoAODv12_v2-v2/60000/ee7372a9-da2d-4b3e-8a0e-3cba6d2272a5.root'
+            inputFile = '/pnfs/iihe/cms/store/user/lathomas/Muon1/2023Dv1_L1TNanowithPrefiringInfo/231129_162737/0000/out_196.root'
         elif args.channel == 'ZToEE':
-            #inputFile = '/user/lathomas/Public/L1Studies/ZToEE.root'
-            inputFile = '/pnfs/iihe/cms/ph/sc4/store/data/Run2023C/EGamma0/NANOAOD/PromptNanoAODv11p9_v1-v1/70000/3b1e99a5-71a0-46ee-b720-b79669f60029.root'
-
+            inputFile = '/pnfs/iihe/cms/store/user/lathomas/EGamma1/2023Dv1_L1TNanowithPrefiringInfo/231129_154543/0000/out_234.root'
+        elif args.channel == 'DiJet':
+            inputFile = '/pnfs/iihe/cms/store/user/lathomas/JetMET1/2023Dv1_L1TNanowithPrefiringInfo/231129_162802/0000/out_98.root'
+        
     ### Set default config file
     config_file = args.config
     if config_file == '':
@@ -69,6 +67,11 @@ def main():
             config_file = '../config_cards/full_ZToMuMu.yaml'
         elif args.channel == 'ZToEE':
             config_file = '../config_cards/full_ZToEE.yaml'
+        if args.channel == 'DiJet':
+            config_file = '../config_cards/full_DiJet.yaml'
+        elif args.channel == 'ZToTauTau':
+            config_file = '../config_cards/full_ZToTauTau.yaml'
+
 
     # Read config and set config_dict in helper
     with open(config_file) as s:
@@ -97,11 +100,14 @@ def main():
         df = df.Filter(fltr)
     nEvents = df.Count().GetValue()
 
+    if not 'L1_UnprefireableEvent_TriggerRules' in df.GetColumnNames():
+        df = df.Define('L1_UnprefireableEvent_TriggerRules','L1_UnprefireableEvent')
+    if not 'L1_UnprefireableEvent_FirstBxInTrain' in df.GetColumnNames():
+        df = df.Define('L1_UnprefireableEvent_FirstBxInTrain','return false;')
+    
+
     print('There are {} events'.format(nEvents))
 
-    if nEvents == 0:
-        print('No events, exiting.')
-        exit()
 
     #Max events to run on 
     max_events = min(nEvents, args.max_events) if args.max_events >=0 else nEvents
@@ -114,19 +120,21 @@ def main():
 
     # binning for run number
     h.set_runnb_bins(df)
-    
+
+    #Define ETMHF
+    df = h.L1ETMHF(df)
     if args.outputFile == '':
         args.outputFile = 'output_'+args.channel+'.root'
     out = ROOT.TFile(args.outputFile, "recreate")
     ####The sequence of filters/column definition starts here
     
-    if args.channel not in ['PhotonJet','MuonJet','ZToMuMu','ZToEE']:
+    if args.channel not in ['PhotonJet','MuonJet','ZToMuMu','ZToEE', 'DiJet', 'ZToTauTau']:
         print("Channel {} does not exist".format(args.channel))
         return 
 
     # add nvtx histo
     nvtx_histo = df.Histo1D(ROOT.RDF.TH1DModel("h_nvtx" , "Number of reco vertices;N_{vtx};Events"  ,    100, 0., 100.), "PV_npvs")
-    nvtx_histo.GetValue().Write()
+
         
     if args.channel == 'PhotonJet':
         df = h.SinglePhotonSelection(df) 
@@ -263,7 +271,9 @@ def main():
 
     if args.channel == 'ZToEE':
         df = h.lepton_iselectron(df)
-        df = h.ZEE_EleSelection(df)
+        df_fwd = h.ZEE_Forward_EleSelection(df, 70, 120)
+        df_prefvsmll = h.ZEE_EleSelection(df, 70, 10000)
+        df = h.ZEE_EleSelection(df, 80, 100)
 
         # make copies of df for each bin of nvtx (+1 copy of the original)
         df_list = [df.Filter(nvtx_cut) for nvtx_cut in filter_list]
@@ -271,15 +281,24 @@ def main():
 
         for i, df_element in enumerate(df_list):
             df_element, histos = h.ZEE_Plots(df_element, suffix = suffix_list[i])
-
+            
             for key, val in histos.items():
                 all_histos[key] = val
+
+        df_fwd, fwd_histos = h.ZEE_Forward_Plots(df_fwd)
         
+        
+        df_prefvsmll, histos_pref = h.PrefiringVsMll(df_prefvsmll)
         for i in all_histos:
             all_histos[i].GetValue().Write()
+        for i in fwd_histos:
+            fwd_histos[i].GetValue().Write()
+        for i in histos_pref:
+            histos_pref[i].GetValue().Write()
 
     if args.channel == 'ZToMuMu':
-        df = h.ZMuMu_MuSelection(df)
+        df_prefvsmll = h.ZMuMu_MuSelection(df, 70, 10000)
+        df = h.ZMuMu_MuSelection(df, 80, 100)
 
         # make copies of df for each bin of nvtx (+1 copy of the original)
         df_list = [df.Filter(nvtx_cut) for nvtx_cut in filter_list]
@@ -290,9 +309,48 @@ def main():
 
             for key, val in histos.items():
                 all_histos[key] = val
+           
 
+        df_prefvsmll, histos_pref = h.PrefiringVsMll(df_prefvsmll)
         for i in all_histos:
             all_histos[i].GetValue().Write()
+        for i in histos_pref:
+            histos_pref[i].GetValue().Write()
+
+    if args.channel == 'DiJet':
+        df = h.DiJetSelection(df) 
+        #df = h.DiJet_Plots(df)
+        df = h.CleanJets(df)
+        all_histos_jets = {}
+
+        df, histos_jets = h.AnalyzeCleanJets(df, 500, 180 )
+        
+        df, histos_mjj = h.PrefiringVsMjj(df)
+        
+        for i in histos_jets:
+            histos_jets[i].GetValue().Write()
+
+        for i in histos_mjj:
+            histos_mjj[i].GetValue().Write()
+            
+    if args.channel == 'ZToTauTau':
+        df = h.ZTauTauSelection(df)
+        
+        # make copies of df for each bin of nvtx (+1 copy of the original)
+        df_list = [df.Filter(nvtx_cut) for nvtx_cut in filter_list]
+        all_histos = {}
+
+        for i, df_element in enumerate(df_list):
+            df_element, histos = h.ZTauTau_Plots(df_element, suffix = suffix_list[i])
+
+            for key, val in histos.items():
+                all_histos[key] = val
+        
+        for i in all_histos:
+            all_histos[i].GetValue().Write()
+
+
+    nvtx_histo.GetValue().Write()
 
 if __name__ == '__main__':
     main()

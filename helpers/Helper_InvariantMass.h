@@ -29,6 +29,7 @@ bool PassDiMumass4to56(ROOT::VecOps::RVec<float>pt, ROOT::VecOps::RVec<float>eta
  return false;
 }
 
+
 bool PassDiJet(ROOT::VecOps::RVec<float>pt, ROOT::VecOps::RVec<float>eta, ROOT::VecOps::RVec<float>phi, float lead_jet_pT_thr, float sublead_jet_pT_thr, float dijet_mass_thr){
 
   for(unsigned int i = 0; i<pt.size(); i++){
@@ -64,13 +65,13 @@ bool PassDiJet75_40_500(ROOT::VecOps::RVec<float>pt, ROOT::VecOps::RVec<float>et
   return false;
 }
 
-
 bool PassDiJet140_70_Mjj900(ROOT::VecOps::RVec<float>pt, ROOT::VecOps::RVec<float>eta, ROOT::VecOps::RVec<float>phi){
 
   for(unsigned int i = 0; i<pt.size(); i++){
     if(pt[i]<140)continue;
     for(unsigned int j = 0; j<pt.size(); j++){
       if(eta[i]*eta[j]>0) continue;
+      if(abs(eta[i]-eta[j])<2.7) continue;
       if(pt[j]<70)continue;
       TLorentzVector jet1, jet2;
       jet1.SetPtEtaPhiM(pt[i], eta[i], phi[i], 0.);
